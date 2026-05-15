@@ -74,7 +74,7 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: Release ${{ env.TAG }} (CUDA 12)
           body: |
-            ### 🛠 編譯資訊
+            ###編譯資訊
             - **系統環境**: Ubuntu 22.04 (GLIBC 2.35)
             - **CUDA 版本**: 12.8
             - **支援架構**: 75, 80, 86, 89, 90, 100, 120
