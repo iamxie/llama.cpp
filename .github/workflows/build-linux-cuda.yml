@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p release
           # 複製編譯好的執行檔
-          cp build/bin/* release/          
+          cp build/bin/* release/
           # 強制抓取 Tag
           git fetch --tags --force
           TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)
