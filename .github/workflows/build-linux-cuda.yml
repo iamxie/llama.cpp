@@ -50,10 +50,18 @@ jobs:
 
       - name: Prepare Artifacts
         run: |
+      - name: Prepare Artifacts
+        run: |
           mkdir release
-          cp build/bin/*.* release/
-          # 獲取版本號
-          TAG=$(git describe --tags --abbrev=0)
+          # 修正：複製二進位檔案，移除舊寫法中的 .* 避免比對失敗
+          cp build/bin/* release/
+
+          # 核心修復：強制拉取遠端的 Tags
+          git fetch --tags
+          
+          # 防炸寫法：嘗試抓取 Tag，若失敗則自動改抓短 Commit ID (如 a1b2c3d)
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)
+          
           echo "TAG=$TAG" >> $GITHUB_ENV
 
       - name: Upload Binaries
