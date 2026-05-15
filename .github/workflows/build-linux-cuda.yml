@@ -1,0 +1,63 @@
+name: Linux CUDA Offline Build
+
+on:
+  workflow_dispatch: # 讓我們可以手動點擊按鈕觸發編譯
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04 # 確保 GLIBC 版本是 2.35，符合你的執行環境
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 為了抓取 bXXXX 這種 tag
+
+      - name: Install Build Tools
+        run: |
+          sudo apt update
+          sudo apt-get install -y wget curl pipx libssl-dev ninja-build lld build-essential dirmngr ca-certificates software-properties-common gpg cmake ccache
+
+      - name: Install CUDA Toolkit
+        run: |
+          # 這裡使用官方的安裝方式，確保版本是 12.8
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt update
+          sudo apt install -y cuda-toolkit-12-9 libnccl2 libnccl-dev
+
+      - name: Configure CMake
+        run: |
+          export PATH=/usr/local/cuda-12.9/bin${PATH:+:${PATH}}
+          export LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+          cmake -G Ninja -B build -DGGML_CUDA=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;100;120" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++ -fuse-ld=lld" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++ -fuse-ld=lld" \
+            -DGGML_NATIVE=OFF \
+            -DGGML_CUDA_GRAPHS=ON \
+            -DGGML_CUDA_FA_ALL_QUANTS=ON \
+            -DCMAKE_C_FLAGS="-march=x86-64-v3" \
+            -DCMAKE_CXX_FLAGS="-march=x86-64-v3" \
+            -DCMAKE_CUDA_RUNTIME_LIBRARY=Static \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build llama.cpp
+        run: |
+          export PATH=/usr/local/cuda-12.9/bin${PATH:+:${PATH}}
+          export LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+          cmake --build build --config Release -j$(nproc)
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir release
+          cp build/bin/*.* release/
+          # 獲取版本號
+          TAG=$(git describe --tags --abbrev=0)
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cpp-${{ env.TAG }}-cuda-ubuntu22.04-cu12
+          path: release/
