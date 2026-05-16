@@ -78,15 +78,21 @@ jobs:
         run: |
           mkdir -p release
           cp build/bin/* release/
-          # 使用上方步驟已鎖定的 env.TAG 進行精準打包
-          tar -zcf llama-cpp-${{ env.TAG }}-linux-cuda12.tar.gz -C release .
+          git fetch --tags --force
+          # 建立一個 Bash 區域變數 TAG
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)          
+          # 將變數傳遞給後續的 Steps 使用
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          # 修正：在同一個步驟內，請直接使用 Bash 的 $TAG，不要用 ${{ env.TAG }}
+          tar -zcf llama-cpp-$TAG-linux-cuda12.tar.gz -C release .
 
       - name: Upload Binaries
         if: steps.check_tag.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: llama-cpp-${{ env.TAG }}-ubuntu22.04-cu12
-          path: release/
+          # 修正：明確指定上傳剛才打包好的 .tar.gz 檔案，而不是整個 release/ 資料夾
+          path: llama-cpp-${{ env.TAG }}-linux-cuda12.tar.gz
 
       - name: Create GitHub Release
         if: steps.check_tag.outputs.skip != 'true'
