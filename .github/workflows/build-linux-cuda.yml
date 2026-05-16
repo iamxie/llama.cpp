@@ -80,7 +80,7 @@ jobs:
           cp build/bin/* release/
           git fetch --tags --force
           # 建立一個 Bash 區域變數 TAG
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)          
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)
           # 將變數傳遞給後續的 Steps 使用
           echo "TAG=$TAG" >> $GITHUB_ENV
           # 修正：在同一個步驟內，請直接使用 Bash 的 $TAG，不要用 ${{ env.TAG }}
