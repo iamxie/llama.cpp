@@ -1,17 +1,19 @@
 name: Linux CUDA Offline Build
 
 on:
-  workflow_dispatch: # 讓我們可以手動點擊按鈕觸發編譯
+  schedule:
+    - cron: '0 2 * * *'  # 每天台灣時間 10:00 AM 自動執行 (UTC 02:00)
+  workflow_dispatch:     # 保留手動按鈕，方便你隨時測試或強制重編
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 確保 GLIBC 版本是 2.35，符合你的執行環境
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 為了抓取 bXXXX 這種 tag
+          fetch-depth: 0 # 完整拉取歷史紀錄以利比對 Tag
 
       - name: Install Build Tools
         run: |
@@ -20,13 +22,37 @@ jobs:
 
       - name: Install CUDA Toolkit
         run: |
-          # 這裡使用官方的安裝方式，確保版本是 12.8
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt update
           sudo apt install -y cuda-toolkit-12-9 libnccl2 libnccl-dev
 
+      - name: Sync Upstream and Check Tag
+        id: check_tag
+        run: |
+          # 1. 加入母專案作為遠端來源並抓取最新 Tag
+          git remote add upstream https://github.com/ggerganov/llama.cpp.git
+          git fetch upstream --tags --force
+          
+          # 2. 取得母專案最新的智慧型流水號 Tag (例如 b9082)
+          LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
+          echo "最新母專案版本為: $LATEST_TAG"
+          echo "TAG=$LATEST_TAG" >> $GITHUB_ENV
+          
+          # 3. 智慧去重：如果 Release 存在且「不是」手動點擊觸發，則跳過編譯節省時間
+          if gh release view "$LATEST_TAG" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "該版本 $LATEST_TAG 已經發佈過，跳過本日定時編譯。"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "準備編譯新版本 $LATEST_TAG，正在切換原始碼..."
+            echo "skip=false" >> $GITHUB_OUTPUT
+            git checkout tags/$LATEST_TAG
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Configure CMake
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           export PATH=/usr/local/cuda-12.9/bin${PATH:+:${PATH}}
           export LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
@@ -43,40 +69,37 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build llama.cpp
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           export PATH=/usr/local/cuda-12.9/bin${PATH:+:${PATH}}
           export LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
           cmake --build build --config Release -j$(nproc)
 
       - name: Prepare and Package Artifacts
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           mkdir -p release
-          # 複製編譯好的執行檔
           cp build/bin/* release/
-          # 強制抓取 Tag
-          git fetch --tags --force
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          # 將檔案打包成一個壓縮檔，檔名包含版本與環境
-          # 這樣使用者下載時，檔案名稱會非常清楚
+          # 使用上方步驟已鎖定的 env.TAG 進行精準打包
           tar -zcf llama-cpp-${{ env.TAG }}-linux-cuda12.tar.gz -C release .
 
       - name: Upload Binaries
+        if: steps.check_tag.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: llama-cpp-${{ env.TAG }}-cuda-ubuntu22.04-cu12
+          name: llama-cpp-${{ env.TAG }}-ubuntu22.04-cu12
           path: release/
 
       - name: Create GitHub Release
+        if: steps.check_tag.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          # 使用剛才抓到的 TAG 作為 Release 的名稱
           tag_name: ${{ env.TAG }}
           name: Release ${{ env.TAG }} (CUDA 12)
           body: |
-            ###編譯資訊
+            ### 🛠 編譯資訊
             - **系統環境**: Ubuntu 22.04 (GLIBC 2.35)
-            - **CUDA 版本**: 12.8
+            - **CUDA 版本**: 12.9
             - **支援架構**: 75, 80, 86, 89, 90, 100, 120
             - **編譯核心**: llama.cpp ${{ env.TAG }}
           draft: false
