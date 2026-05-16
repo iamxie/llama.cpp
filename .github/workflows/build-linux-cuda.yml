@@ -33,18 +33,19 @@ jobs:
           # 1. 加入母專案作為遠端來源並抓取最新 Tag
           git remote add upstream https://github.com/ggerganov/llama.cpp.git
           git fetch upstream --tags --force
-          # 2. 取得母專案最新的智慧型流水號 Tag (例如 b9082)
-          LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
+          # 2. 修正：限定只取得 b 開頭的母專案最新流水號 Tag (例如 b9174)
+          # 這樣可以徹底過濾掉你 Fork 倉庫中不小心產生的 master- 污染標籤
+          LATEST_TAG=$(git tag -l "b*" --sort=-v:refname | head -n 1)
           echo "最新母專案版本為: $LATEST_TAG"
           echo "TAG=$LATEST_TAG" >> $GITHUB_ENV
-          # 3. 智慧去重：如果 Release 存在且「不是」手動點擊觸發，則跳過編譯節省時間
+          # 3. 智慧去重
           if gh release view "$LATEST_TAG" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
             echo "該版本 $LATEST_TAG 已經發佈過，跳過本日定時編譯。"
             echo "skip=true" >> $GITHUB_OUTPUT
           else
             echo "準備編譯新版本 $LATEST_TAG，正在切換原始碼..."
             echo "skip=false" >> $GITHUB_OUTPUT
-            git checkout tags/$LATEST_TAG
+            git checkout $LATEST_TAG
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,12 +79,8 @@ jobs:
         run: |
           mkdir -p release
           cp build/bin/* release/
-          git fetch --tags --force
-          # 建立一個 Bash 區域變數 TAG
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)
-          # 將變數傳遞給後續的 Steps 使用
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          # 修正：在同一個步驟內，請直接使用 Bash 的 $TAG，不要用 ${{ env.TAG }}
+          # 修正：直接沿用第一步就已經存進環境變數中的 $TAG 即可
+          # 既乾淨又不會有被覆蓋或抓錯的風險
           tar -zcf llama-cpp-$TAG-linux-cuda12.tar.gz -C release .
 
       - name: Upload Binaries
