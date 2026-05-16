@@ -33,12 +33,10 @@ jobs:
           # 1. 加入母專案作為遠端來源並抓取最新 Tag
           git remote add upstream https://github.com/ggerganov/llama.cpp.git
           git fetch upstream --tags --force
-          
           # 2. 取得母專案最新的智慧型流水號 Tag (例如 b9082)
           LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
           echo "最新母專案版本為: $LATEST_TAG"
           echo "TAG=$LATEST_TAG" >> $GITHUB_ENV
-          
           # 3. 智慧去重：如果 Release 存在且「不是」手動點擊觸發，則跳過編譯節省時間
           if gh release view "$LATEST_TAG" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
             echo "該版本 $LATEST_TAG 已經發佈過，跳過本日定時編譯。"
