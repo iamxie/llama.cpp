@@ -4,20 +4,6 @@ ARG BUILD_DATE=N/A
 ARG APP_VERSION=N/A
 ARG APP_REVISION=N/A
 
-ARG NODE_VERSION=24
-
-FROM docker.io/node:$NODE_VERSION AS web
-
-ARG APP_VERSION
-
-WORKDIR /app/tools/ui
-
-COPY tools/ui/package.json tools/ui/package-lock.json ./
-RUN npm ci
-
-COPY tools/ui/ ./
-RUN LLAMA_BUILD_NUMBER="$APP_VERSION" npm run build
-
 ### Build Llama.cpp stage
 FROM docker.io/gcc:${GCC_VERSION} AS build
 
@@ -33,8 +19,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /app
 COPY . .
-
-COPY --from=web /app/tools/ui/dist tools/ui/dist
 
 RUN --mount=type=cache,target=/root/.ccache \
     --mount=type=cache,target=/app/build \
@@ -140,7 +124,7 @@ WORKDIR /llama.cpp/bin
 
 # Copy llama.cpp binaries and libraries
 COPY --from=collector /llama.cpp/bin/*.so /llama.cpp/bin
-COPY --from=collector /llama.cpp/bin/llama-cli /llama.cpp/bin/llama-completion /llama.cpp/bin
+COPY --from=collector /llama.cpp/bin/llama /llama.cpp/bin/llama-cli /llama.cpp/bin/llama-completion /llama.cpp/bin
 
 ENTRYPOINT [ "/llama.cpp/bin/llama-cli" ]
 
@@ -154,7 +138,7 @@ WORKDIR /llama.cpp/bin
 
 # Copy llama.cpp binaries and libraries
 COPY --from=collector /llama.cpp/bin/*.so /llama.cpp/bin
-COPY --from=collector /llama.cpp/bin/llama-server /llama.cpp/bin
+COPY --from=collector /llama.cpp/bin/llama /llama.cpp/bin/llama-server /llama.cpp/bin
 
 EXPOSE 8080
 
