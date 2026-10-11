@@ -15,41 +15,50 @@ jobs:
         with:
           fetch-depth: 0 # 完整拉取歷史紀錄以利比對 Tag
 
+      # 先檢查 Tag 再裝工具：這一步只需要 runner 內建的 git 與 gh，
+      # 已發佈過的版本可以直接跳過後面所有安裝與編譯步驟
+      - name: Sync Upstream and Check Tag
+        id: check_tag
+        run: |
+          # 1. 加入母專案作為遠端來源並抓取最新 Tag
+          git remote add upstream https://github.com/ggml-org/llama.cpp.git
+          git fetch upstream --tags --force
+          # 2. 只取「b + 純數字」格式的母專案流水號 Tag (例如 b11552)
+          # 不能只用 glob "b*"：母專案有 backup/... 與 b10964-b10964-b29c606 這類 Tag，
+          # 會被一起撈進來，而且帶斜線的 Tag 會讓後面的 tar 輸出路徑壞掉
+          LATEST_TAG=$(git tag -l 'b*' | grep -E '^b[0-9]+$' | sort -V | tail -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "找不到 b<數字> 格式的 Tag，中止。"
+            exit 1
+          fi
+          echo "最新母專案版本為: $LATEST_TAG"
+          echo "TAG=$LATEST_TAG" >> "$GITHUB_ENV"
+          # 3. 智慧去重
+          # 一定要指定 --repo：加了 upstream remote 之後，gh 預設會去查母專案的 Release，
+          # 而不是這個 Fork 自己的，結果會變成排程永遠判定「已發佈」
+          if gh release view "$LATEST_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "該版本 $LATEST_TAG 已經發佈過，跳過本日定時編譯。"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "準備編譯新版本 $LATEST_TAG，正在切換原始碼..."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            git checkout "$LATEST_TAG"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Build Tools
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           sudo apt update
           sudo apt-get install -y wget curl pipx libssl-dev ninja-build lld build-essential dirmngr ca-certificates software-properties-common gpg cmake ccache
-
       - name: Install CUDA Toolkit
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt update
           sudo apt install -y cuda-toolkit-12-9 libnccl2 libnccl-dev
-
-      - name: Sync Upstream and Check Tag
-        id: check_tag
-        run: |
-          # 1. 加入母專案作為遠端來源並抓取最新 Tag
-          git remote add upstream https://github.com/ggerganov/llama.cpp.git
-          git fetch upstream --tags --force
-          # 2. 修正：限定只取得 b 開頭的母專案最新流水號 Tag (例如 b9174)
-          # 這樣可以徹底過濾掉你 Fork 倉庫中不小心產生的 master- 污染標籤
-          LATEST_TAG=$(git tag -l "b*" --sort=-v:refname | head -n 1)
-          echo "最新母專案版本為: $LATEST_TAG"
-          echo "TAG=$LATEST_TAG" >> $GITHUB_ENV
-          # 3. 智慧去重
-          if gh release view "$LATEST_TAG" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "該版本 $LATEST_TAG 已經發佈過，跳過本日定時編譯。"
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "準備編譯新版本 $LATEST_TAG，正在切換原始碼..."
-            echo "skip=false" >> $GITHUB_OUTPUT
-            git checkout $LATEST_TAG
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Configure CMake
         if: steps.check_tag.outputs.skip != 'true'
         run: |
@@ -66,23 +75,19 @@ jobs:
             -DCMAKE_CXX_FLAGS="-march=x86-64-v3" \
             -DCMAKE_CUDA_RUNTIME_LIBRARY=Static \
             -DCMAKE_BUILD_TYPE=Release
-
       - name: Build llama.cpp
         if: steps.check_tag.outputs.skip != 'true'
         run: |
           export PATH=/usr/local/cuda-12.9/bin${PATH:+:${PATH}}
           export LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
           cmake --build build --config Release -j$(nproc)
-
       - name: Prepare and Package Artifacts
         if: steps.check_tag.outputs.skip != 'true'
         run: |
           mkdir -p release
           cp build/bin/* release/
-          # 修正：直接沿用第一步就已經存進環境變數中的 $TAG 即可
-          # 既乾淨又不會有被覆蓋或抓錯的風險
-          tar -zcf llama-cpp-$TAG-linux-cuda12.tar.gz -C release .
-
+          # 沿用 Check Tag 步驟存進環境變數的 $TAG（已保證是 b<數字>，不含斜線）
+          tar -zcf "llama-cpp-${TAG}-linux-cuda12.tar.gz" -C release .
       - name: Upload Binaries
         if: steps.check_tag.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
